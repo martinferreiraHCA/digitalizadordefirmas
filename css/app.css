@@ -172,6 +172,14 @@ body {
   font-family: 'DM Sans', sans-serif;
 }
 .mtab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+.mtab-accent { border-color: rgba(34,197,94,.25); color: var(--green) !important; }
+.mtab-accent.on { border-color: var(--green); color: var(--green) !important; background: rgba(34,197,94,.12); }
+.rbg-info {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 8px 10px; background: rgba(34,197,94,.08);
+  border: 1px solid rgba(34,197,94,.2); border-radius: 8px;
+  font-size: 10px; color: var(--text2); line-height: 1.5;
+}
 
 /* ── Sliders ── */
 .slider-row { margin-bottom: 10px; }

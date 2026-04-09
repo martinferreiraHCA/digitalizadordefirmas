@@ -5,7 +5,7 @@
 import { APP_CONFIG } from './config.js';
 import { $, $$, showOv, showOvProgress, hideOv, downloadBlob, canvasToBlob, haptic, cameraSound, canShare, shareFile, getImageFromClipboard, formatDate } from './utils.js';
 import { formatCI, getDigits, isValidCI } from './cedula.js';
-import { cvPipeline, fallbackPipeline, renderToCanvas } from './pipeline.js';
+import { cvPipeline, fallbackPipeline, removeBgPipeline, renderToCanvas } from './pipeline.js';
 import { saveSignature, getAllSignatures, deleteSignature, clearAllSignatures, getCount } from './history.js';
 
 // ── State ──
@@ -69,7 +69,11 @@ function handleWorkerMessage(e) {
     canvas.height = msg.height;
     canvas.getContext('2d').putImageData(imgData, 0, 0);
     updatePreviewLabel();
-    updateTransparentBg();
+    if (APP_CONFIG.PROCESSING.method === 'removebg') {
+      $('.sig-preview').classList.add('transparent-bg');
+    } else {
+      updateTransparentBg();
+    }
     hideOv();
   } else if (msg.type === 'error') {
     pipelineLog = msg.log || [];
@@ -189,9 +193,19 @@ $$('#methodTabs .mtab').forEach(tab => {
     tab.classList.add('on');
     const m = tab.dataset.m;
     APP_CONFIG.PROCESSING.method = m;
+    const isRbg = m === 'removebg';
     $('#ctrlAdaptive').style.display = m === 'adaptive' ? '' : 'none';
     $('#ctrlOtsu').style.display = m === 'otsu' ? '' : 'none';
     $('#ctrlManual').style.display = m === 'manual' ? '' : 'none';
+    $('#ctrlRemovebg').style.display = isRbg ? '' : 'none';
+    // Hide standard controls when removeBg is active (it has its own pipeline)
+    $('#commonControls').style.display = isRbg ? 'none' : '';
+    // Auto-enable transparent background preview in removeBg mode
+    if (isRbg) {
+      $('.sig-preview').classList.add('transparent-bg');
+    } else {
+      updateTransparentBg();
+    }
     runPipeline();
   });
 });
@@ -210,6 +224,18 @@ bindSlider('rThresh', 'vThresh', 'manualThreshold');
 bindSlider('rBlur', 'vBlur', 'gaussianBlur');
 bindSlider('rMorph', 'vMorph', 'morphKernelSize');
 
+// Remove BG sliders
+bindSlider('rRbgSens', 'vRbgSens', 'removeBgSensitivity');
+bindSlider('rRbgArea', 'vRbgArea', 'removeBgMinArea');
+bindSlider('rRbgSmooth', 'vRbgSmooth', 'removeBgEdgeSmooth');
+
+// Remove BG boost slider (needs special handling — stored as decimal)
+$('#rRbgBoost').addEventListener('input', function () {
+  $('#vRbgBoost').textContent = this.value;
+  APP_CONFIG.PROCESSING.removeBgAlphaBoost = parseInt(this.value) / 100;
+  runPipeline();
+});
+
 // ── Toggles ──
 function bindToggle(id, key) {
   $(`#${id}`).addEventListener('click', function () {
@@ -225,6 +251,7 @@ bindToggle('tMorph', 'morphCleanup');
 bindToggle('tAutoCrop', 'autoCrop');
 bindToggle('tPerspective', 'perspectiveCorrection');
 bindToggle('tTransparent', 'transparentBackground');
+bindToggle('tRbgColor', 'removeBgPreserveColor');
 
 function updateTransparentBg() {
   const isT = APP_CONFIG.PROCESSING.transparentBackground;
@@ -234,8 +261,10 @@ function updateTransparentBg() {
 
 function updatePreviewLabel() {
   const W = APP_CONFIG.OUTPUT_WIDTH, H = APP_CONFIG.OUTPUT_HEIGHT;
-  const fmt = APP_CONFIG.PROCESSING.transparentBackground ? 'PNG (alpha)' : 'PNG';
-  $('#prevLbl').textContent = `${W} × ${H} px · ${fmt}`;
+  const isRbg = APP_CONFIG.PROCESSING.method === 'removebg';
+  const fmt = (isRbg || APP_CONFIG.PROCESSING.transparentBackground) ? 'PNG (alpha)' : 'PNG';
+  const label = isRbg ? `${W} × ${H} px · ${fmt} · Remove BG` : `${W} × ${H} px · ${fmt}`;
+  $('#prevLbl').textContent = label;
 }
 
 // ══════════════════════════════════════════════════
@@ -279,10 +308,18 @@ function runPipelineMainThread() {
   const W = APP_CONFIG.OUTPUT_WIDTH;
   const H = APP_CONFIG.OUTPUT_HEIGHT;
 
-  if (cvReady) {
+  if (P.method === 'removebg' && cvReady) {
+    // Remove BG pipeline (requires OpenCV)
+    const result = removeBgPipeline(croppedCanvas, P);
+    pipelineLog = result.log;
+    renderToCanvas($('#prevCanvas'), result);
+    // Always show transparent bg in removeBg mode
+    $('.sig-preview').classList.add('transparent-bg');
+  } else if (cvReady) {
     const result = cvPipeline(croppedCanvas, P);
     pipelineLog = result.log;
     renderToCanvas($('#prevCanvas'), result);
+    updateTransparentBg();
   } else {
     const result = fallbackPipeline(croppedCanvas, P);
     pipelineLog = result.log;
@@ -290,9 +327,9 @@ function runPipelineMainThread() {
     canvas.width = W;
     canvas.height = H;
     canvas.getContext('2d').drawImage(result.canvas, 0, 0);
+    updateTransparentBg();
   }
   updatePreviewLabel();
-  updateTransparentBg();
 }
 
 // ── Comparator ──
@@ -381,8 +418,9 @@ $('#btnSave').addEventListener('click', async () => {
   rc.getContext('2d').drawImage($('#prevCanvas'), 0, 0, W, H);
 
   // Update transparent bg class
+  const isRbg = APP_CONFIG.PROCESSING.method === 'removebg';
   const resImg = $('.res-img');
-  resImg.classList.toggle('transparent-bg', APP_CONFIG.PROCESSING.transparentBackground);
+  resImg.classList.toggle('transparent-bg', isRbg || APP_CONFIG.PROCESSING.transparentBackground);
 
   // Update meta
   $('#resCi').textContent = ci;
