@@ -2,7 +2,7 @@
  * Service Worker — Escáner de Firmas
  * Caches app shell and CDN dependencies for offline use.
  */
-const CACHE_NAME = 'firma-scanner-v1';
+const CACHE_NAME = 'firma-scanner-v2';
 
 const APP_SHELL = [
   './',

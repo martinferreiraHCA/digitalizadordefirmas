@@ -121,6 +121,7 @@
             <div class="mtab on" data-m="adaptive">Adaptativo</div>
             <div class="mtab" data-m="otsu">Otsu</div>
             <div class="mtab" data-m="manual">Manual</div>
+            <div class="mtab mtab-accent" data-m="removebg">Remove BG</div>
           </div>
 
           <!-- Adaptive controls -->
@@ -148,7 +149,33 @@
             </div>
           </div>
 
-          <!-- Common controls -->
+          <!-- Remove BG controls -->
+          <div id="ctrlRemovebg" style="display:none">
+            <div class="rbg-info">
+              <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:var(--green);fill:none;stroke-width:2;flex-shrink:0"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span>Elimina fondo e impurezas automáticamente. Genera PNG con fondo transparente y bordes suaves.</span>
+            </div>
+            <div class="slider-row mt8">
+              <div class="slider-head"><label>Sensibilidad de tinta</label><span class="sval" id="vRbgSens">30</span></div>
+              <input type="range" id="rRbgSens" min="5" max="80" value="30">
+            </div>
+            <div class="slider-row">
+              <div class="slider-head"><label>Limpieza (área mínima)</label><span class="sval" id="vRbgArea">15</span></div>
+              <input type="range" id="rRbgArea" min="1" max="100" value="15">
+            </div>
+            <div class="slider-row">
+              <div class="slider-head"><label>Suavizado de bordes</label><span class="sval" id="vRbgSmooth">1</span></div>
+              <input type="range" id="rRbgSmooth" min="0" max="3" value="1">
+            </div>
+            <div class="slider-row">
+              <div class="slider-head"><label>Opacidad de trazos</label><span class="sval" id="vRbgBoost">45</span></div>
+              <input type="range" id="rRbgBoost" min="20" max="80" value="45">
+            </div>
+            <div class="toggle-row"><label>Preservar color de tinta</label><div class="toggle" id="tRbgColor"></div></div>
+          </div>
+
+          <!-- Common controls (hidden in removebg mode) -->
+          <div id="commonControls">
           <div class="slider-row mt8">
             <div class="slider-head"><label>Desenfoque Gaussiano</label><span class="sval" id="vBlur">3</span></div>
             <input type="range" id="rBlur" min="0" max="15" step="2" value="3">
@@ -165,6 +192,7 @@
           <div class="toggle-row"><label>Auto-recorte (bounding box)</label><div class="toggle on" id="tAutoCrop"></div></div>
           <div class="toggle-row"><label>Corrección de perspectiva</label><div class="toggle" id="tPerspective"></div></div>
           <div class="toggle-row"><label>Fondo transparente</label><div class="toggle" id="tTransparent"></div></div>
+          </div><!-- /commonControls -->
         </div>
 
         <!-- Preview -->

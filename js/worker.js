@@ -29,7 +29,9 @@ self.onmessage = function (e) {
   const { type, imageData, width, height, config } = e.data;
 
   if (type === 'process') {
-    if (cvReady) {
+    if (config.PROCESSING.method === 'removebg' && cvReady) {
+      processRemoveBg(imageData, width, height, config);
+    } else if (cvReady) {
       processWithCV(imageData, width, height, config);
     } else {
       processWithFallback(imageData, width, height, config);
@@ -252,6 +254,216 @@ function processWithFallback(imageData, w, h, cfg) {
     height: H,
     log,
   }, [outData.buffer]);
+}
+
+// ══════════════════════════════════════════════════
+// Remove BG pipeline (worker version)
+// ══════════════════════════════════════════════════
+function processRemoveBg(imageData, w, h, cfg) {
+  const P = cfg.PROCESSING;
+  const W = cfg.OUTPUT_WIDTH;
+  const H = cfg.OUTPUT_HEIGHT;
+  const log = [];
+  const STEPS = 9;
+
+  try {
+    let src = cv.matFromImageData(new ImageData(new Uint8ClampedArray(imageData), w, h));
+    log.push('Imagen cargada');
+    progress(1, STEPS, 'Preparando imagen...');
+
+    // Perspective correction
+    if (P.perspectiveCorrection) {
+      const corrected = perspectiveCorrectWorker(src);
+      if (corrected) { src.delete(); src = corrected; log.push('Corrección de perspectiva'); }
+    }
+
+    // Save color for preserveColor mode
+    let colorSrc = null;
+    if (P.removeBgPreserveColor) {
+      colorSrc = new cv.Mat();
+      src.copyTo(colorSrc);
+    }
+
+    // Grayscale
+    const gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    log.push('Escala de grises');
+    progress(2, STEPS, 'Mejorando contraste...');
+
+    // CLAHE
+    const clahe = new cv.CLAHE(2.0, new cv.Size(8, 8));
+    clahe.apply(gray, gray);
+    clahe.delete();
+    log.push('CLAHE (contraste local)');
+    progress(3, STEPS, 'Estimando fondo...');
+
+    // Background estimation via morphological closing
+    let bgK = P.removeBgBgKernel || 51;
+    if (bgK % 2 === 0) bgK++;
+    const bgKernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(bgK, bgK));
+    const bg = new cv.Mat();
+    cv.morphologyEx(gray, bg, cv.MORPH_CLOSE, bgKernel);
+    bgKernel.delete();
+    log.push(`Estimación de fondo (kernel ${bgK})`);
+    progress(4, STEPS, 'Normalizando iluminación...');
+
+    // Normalize: subtract background
+    const signal = new cv.Mat();
+    cv.subtract(bg, gray, signal);
+    bg.delete();
+    cv.normalize(signal, signal, 0, 255, cv.NORM_MINMAX);
+    cv.GaussianBlur(signal, signal, new cv.Size(3, 3), 0);
+    log.push('Normalización de iluminación');
+    progress(5, STEPS, 'Detectando tinta...');
+
+    // Threshold for ink candidates
+    const sensitivity = P.removeBgSensitivity || 30;
+    const binMask = new cv.Mat();
+    cv.threshold(signal, binMask, sensitivity, 255, cv.THRESH_BINARY);
+    log.push(`Detección de tinta (sensibilidad=${sensitivity})`);
+    progress(6, STEPS, 'Eliminando impurezas...');
+
+    // Connected components filtering
+    const labels = new cv.Mat();
+    const stats = new cv.Mat();
+    const centroids = new cv.Mat();
+    const numLabels = cv.connectedComponentsWithStats(binMask, labels, stats, centroids);
+    const minArea = P.removeBgMinArea || 15;
+    const totalPixels = binMask.rows * binMask.cols;
+
+    const keepLabel = new Uint8Array(numLabels);
+    let keptCount = 0;
+    for (let i = 1; i < numLabels; i++) {
+      const area = stats.intAt(i, cv.CC_STAT_AREA);
+      if (area >= minArea && area < totalPixels * 0.85) {
+        keepLabel[i] = 1;
+        keptCount++;
+      }
+    }
+
+    const cleanMask = new cv.Mat(binMask.rows, binMask.cols, cv.CV_8UC1, new cv.Scalar(0));
+    const labelData = labels.data32S;
+    const cleanData = cleanMask.data;
+    for (let i = 0; i < labelData.length; i++) {
+      if (keepLabel[labelData[i]]) cleanData[i] = 255;
+    }
+
+    labels.delete(); stats.delete(); centroids.delete(); binMask.delete();
+    log.push(`Limpieza: ${numLabels - 1} → ${keptCount} componentes (min=${minArea}px²)`);
+    progress(7, STEPS, 'Generando alpha...');
+
+    // Close small gaps in strokes
+    const closeK = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(3, 3));
+    cv.morphologyEx(cleanMask, cleanMask, cv.MORPH_CLOSE, closeK);
+    closeK.delete();
+
+    // Soft alpha from signal masked by clean mask
+    const alpha = new cv.Mat();
+    cv.bitwise_and(signal, signal, alpha, cleanMask);
+    signal.delete(); cleanMask.delete();
+
+    // Boost alpha with power curve
+    const alphaBoost = P.removeBgAlphaBoost || 0.45;
+    const aData = alpha.data;
+    for (let i = 0; i < aData.length; i++) {
+      let v = aData[i] / 255;
+      if (v < 0.02) { aData[i] = 0; }
+      else { aData[i] = Math.min(255, Math.round(Math.pow(v, alphaBoost) * 255)); }
+    }
+    log.push(`Alpha matting (boost=${alphaBoost})`);
+
+    // Edge anti-aliasing
+    const edgeSmooth = P.removeBgEdgeSmooth || 1;
+    if (edgeSmooth > 0) {
+      let k = edgeSmooth * 2 + 1;
+      cv.GaussianBlur(alpha, alpha, new cv.Size(k, k), 0);
+      log.push(`Anti-alias (${k}×${k})`);
+    }
+    progress(8, STEPS, 'Recortando...');
+
+    // Auto-crop based on alpha
+    let cropAlpha = alpha;
+    if (P.autoCrop) {
+      const thresh = new cv.Mat();
+      cv.threshold(alpha, thresh, 5, 255, cv.THRESH_BINARY);
+      const contours = new cv.MatVector();
+      const hier = new cv.Mat();
+      cv.findContours(thresh, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+      if (contours.size() > 0) {
+        let x1 = alpha.cols, y1 = alpha.rows, x2 = 0, y2 = 0;
+        for (let i = 0; i < contours.size(); i++) {
+          const r = cv.boundingRect(contours.get(i));
+          x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y);
+          x2 = Math.max(x2, r.x + r.width); y2 = Math.max(y2, r.y + r.height);
+        }
+        const pad = P.autoCropPadding;
+        x1 = Math.max(0, x1 - pad); y1 = Math.max(0, y1 - pad);
+        x2 = Math.min(alpha.cols, x2 + pad); y2 = Math.min(alpha.rows, y2 + pad);
+        const cw = x2 - x1, ch = y2 - y1;
+        if (cw > 10 && ch > 10) {
+          const roiA = alpha.roi(new cv.Rect(x1, y1, cw, ch));
+          cropAlpha = new cv.Mat(); roiA.copyTo(cropAlpha); roiA.delete();
+          if (colorSrc) {
+            const roiC = colorSrc.roi(new cv.Rect(x1, y1, cw, ch));
+            const cc = new cv.Mat(); roiC.copyTo(cc); roiC.delete();
+            colorSrc.delete(); colorSrc = cc;
+          }
+          log.push(`Auto-crop (${cw}×${ch})`);
+        }
+      }
+      thresh.delete(); contours.delete(); hier.delete();
+    }
+    progress(9, STEPS, 'Finalizando...');
+
+    // Resize
+    const outAlpha = new cv.Mat();
+    cv.resize(cropAlpha, outAlpha, new cv.Size(W, H), 0, 0, cv.INTER_AREA);
+    if (cropAlpha !== alpha) cropAlpha.delete();
+    alpha.delete();
+
+    let outColor = null;
+    if (colorSrc) {
+      outColor = new cv.Mat();
+      cv.resize(colorSrc, outColor, new cv.Size(W, H), 0, 0, cv.INTER_AREA);
+      colorSrc.delete();
+    }
+
+    // Build RGBA
+    const resultData = new Uint8ClampedArray(W * H * 4);
+    const aOut = outAlpha.data;
+    if (outColor) {
+      const cData = outColor.data;
+      for (let i = 0; i < aOut.length; i++) {
+        const ri = i * 4;
+        resultData[ri] = cData[ri];
+        resultData[ri + 1] = cData[ri + 1];
+        resultData[ri + 2] = cData[ri + 2];
+        resultData[ri + 3] = aOut[i];
+      }
+      outColor.delete();
+    } else {
+      for (let i = 0; i < aOut.length; i++) {
+        const ri = i * 4;
+        resultData[ri] = 0;
+        resultData[ri + 1] = 0;
+        resultData[ri + 2] = 0;
+        resultData[ri + 3] = aOut[i];
+      }
+    }
+    outAlpha.delete(); src.delete(); gray.delete();
+
+    log.push(`Resize ${W}×${H}`);
+    log.push('✓ Fondo removido (alpha matting)');
+
+    postMessage({
+      type: 'result',
+      imageData: resultData.buffer,
+      width: W, height: H, log,
+    }, [resultData.buffer]);
+
+  } catch (err) {
+    postMessage({ type: 'error', error: err.message, log });
+  }
 }
 
 function perspectiveCorrectWorker(src) {
