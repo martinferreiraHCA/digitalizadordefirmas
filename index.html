@@ -3,177 +3,77 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#08080e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Escáner de Firmas · HCA</title>
 
-  <!-- ============================================================
-       DEPENDENCIAS
-       ============================================================
-       - OpenCV.js 4.x: adaptive threshold, morphological ops,
-         contour detection, Gaussian blur, CLAHE
-       - Cropper.js: recorte interactivo pre-procesamiento
-       ============================================================ -->
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='96' fill='%2308080e'/%3E%3Cpath d='M128 340c40-80 80-200 130-200s50 100 80 100 40-60 60-60' stroke='%233b82f6' stroke-width='24' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+
+  <!-- Dependencies -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css">
-
-  <!-- ============================================================
-       CONFIGURACIÓN
-       ============================================================ -->
-  <script>
-    const APP_CONFIG = {
-      OUTPUT_WIDTH: 600,
-      OUTPUT_HEIGHT: 200,
-      OUTPUT_FORMAT: 'image/png',
-      FILE_PREFIX: 'firma',
-      PROCESSING: {
-        method: 'adaptive',
-        gaussianBlur: 3,
-        adaptiveBlockSize: 25,
-        adaptiveC: 10,
-        manualThreshold: 128,
-        morphCleanup: true,
-        morphKernelSize: 2,
-        autoCrop: true,
-        autoCropPadding: 10,
-        contrastEnhance: true,
-        clipLimit: 2.0,
-        tileSize: 8,
-      }
-    };
-  </script>
-
-  <style>
-    :root {
-      --bg:#08080e;--bg-card:#101018;--bg-input:#181824;
-      --accent:#3b82f6;--accent-dim:rgba(59,130,246,.15);--accent-glow:rgba(59,130,246,.25);
-      --text:#e4e4ee;--text2:#8585a0;--text3:#50506a;--border:#252538;
-      --green:#22c55e;--red:#ef4444;--orange:#f59e0b;
-      --r:14px;--rs:10px;--safe-b:env(safe-area-inset-bottom,0px);
-    }
-    @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;600&display=swap');
-
-    *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-    html,body{height:100%;overflow:hidden}
-    body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);overscroll-behavior:none;position:fixed;width:100%}
-
-    #app{display:flex;flex-direction:column;height:100dvh;max-width:480px;margin:0 auto;position:relative}
-    .hdr{padding:14px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;background:var(--bg);z-index:10}
-    .hdr h1{font-size:17px;font-weight:700;letter-spacing:-.3px;background:linear-gradient(135deg,var(--text),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-    .badge{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);background:var(--bg-input);padding:3px 10px;border-radius:20px;border:1px solid var(--border)}
-    .steps{display:flex;gap:5px;padding:10px 20px;flex-shrink:0}
-    .dot{flex:1;height:3px;border-radius:3px;background:var(--border);transition:all .35s}
-    .dot.on{background:var(--accent);box-shadow:0 0 8px var(--accent-glow)}
-    .dot.ok{background:var(--green)}
-    .body{flex:1;overflow-y:auto;padding:14px 20px;padding-bottom:calc(110px + var(--safe-b))}
-    .bar{position:absolute;bottom:0;left:0;right:0;padding:14px 20px;padding-bottom:calc(14px + var(--safe-b));background:linear-gradient(to top,var(--bg) 70%,transparent);z-index:10}
-
-    .scr{display:none;animation:fadeIn .3s ease-out}
-    .scr.on{display:flex;flex-direction:column;height:100%}
-    @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
-
-    .cap-zone{width:100%;aspect-ratio:3/2;border:2px dashed var(--border);border-radius:var(--r);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;cursor:pointer;background:var(--bg-card);overflow:hidden;position:relative;transition:border-color .3s,background .3s}
-    .cap-zone:active{border-color:var(--accent);background:var(--accent-dim)}
-    .cap-zone.has img{display:block}.cap-zone.has .cap-ph{display:none}
-    .cap-zone.has{border-style:solid;border-color:var(--accent)}
-    .cap-zone img{width:100%;height:100%;object-fit:contain;display:none}
-    .cap-ph{text-align:center;color:var(--text2)}
-    .cap-ico{width:46px;height:46px;margin:0 auto 6px;border-radius:50%;background:var(--bg-input);display:flex;align-items:center;justify-content:center;border:1px solid var(--border)}
-    .cap-ico svg{width:22px;height:22px;stroke:var(--accent);fill:none;stroke-width:2}
-    .cap-ph p{font-size:13px;font-weight:500}.cap-ph span{font-size:11px;color:var(--text3)}
-    #camIn{display:none}
-
-    .crop-box{width:100%;aspect-ratio:3/1.5;background:var(--bg-card);border-radius:var(--r);overflow:hidden;position:relative}
-    .crop-box img{max-width:100%;display:block}
-    .cropper-view-box{outline:2px solid var(--accent)!important}
-    .cropper-line,.cropper-point{background-color:var(--accent)!important}
-    .cropper-modal{background-color:rgba(0,0,0,.7)!important}
-
-    .proc-section{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-top:14px}
-    .proc-title{font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;display:flex;align-items:center;gap:6px}
-    .proc-title svg{width:14px;height:14px;stroke:var(--accent);fill:none;stroke-width:2}
-
-    .method-tabs{display:flex;gap:6px;margin-bottom:12px}
-    .mtab{flex:1;padding:8px 4px;border:1px solid var(--border);border-radius:8px;background:var(--bg-input);font-size:11px;font-weight:600;color:var(--text2);text-align:center;cursor:pointer;transition:all .2s;font-family:'DM Sans',sans-serif}
-    .mtab.on{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
-
-    .slider-row{margin-bottom:10px}
-    .slider-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
-    .slider-head label{font-size:11px;color:var(--text2);font-weight:500}
-    .sval{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--accent);background:var(--bg-input);padding:1px 7px;border-radius:5px}
-    input[type=range]{-webkit-appearance:none;width:100%;height:3px;border-radius:3px;background:var(--border);outline:none}
-    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:var(--accent);border:3px solid var(--bg);box-shadow:0 0 6px var(--accent-glow);cursor:pointer}
-
-    .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0}
-    .toggle-row label{font-size:11px;color:var(--text2)}
-    .toggle{width:38px;height:20px;border-radius:10px;background:var(--border);position:relative;cursor:pointer;transition:background .3s;flex-shrink:0}
-    .toggle.on{background:var(--accent)}
-    .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .3s}
-    .toggle.on::after{transform:translateX(18px)}
-
-    .sig-preview{width:100%;background:#fff;border-radius:var(--rs);overflow:hidden;margin-top:14px;border:1px solid var(--border)}
-    .sig-preview canvas{width:100%;display:block}
-    .prev-lbl{font-size:10px;color:var(--text3);text-align:center;padding:6px;background:var(--bg-card);font-family:'JetBrains Mono',monospace;border-top:1px solid var(--border)}
-
-    .fg{margin-bottom:16px}
-    .fl{display:block;font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.7px;margin-bottom:6px}
-    .fi{width:100%;padding:12px 14px;background:var(--bg-input);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);font-family:'JetBrains Mono',monospace;font-size:18px;letter-spacing:2px;text-align:center;outline:none;transition:border-color .3s,box-shadow .3s}
-    .fi:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
-    .fi::placeholder{color:var(--text3);letter-spacing:1px;font-size:13px}
-    .fh{font-size:10px;color:var(--text3);margin-top:4px;font-family:'JetBrains Mono',monospace}
-
-    .res-card{background:var(--bg-card);border-radius:var(--r);border:1px solid var(--border);overflow:hidden}
-    .res-img{background:#fff;padding:14px;display:flex;align-items:center;justify-content:center}
-    .res-img canvas{max-width:100%;border:1px solid #e0e0e0}
-    .res-meta{padding:14px;display:flex;flex-direction:column;gap:6px}
-    .meta-r{display:flex;justify-content:space-between;align-items:center}
-    .mk{font-size:11px;color:var(--text2)}.mv{font-family:'JetBrains Mono',monospace;font-size:12px}
-
-    .pipe-info{margin-top:12px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--rs);font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text3);line-height:1.6}
-    .pipe-step{color:var(--text2)}.pipe-step b{color:var(--accent);font-weight:600}
-
-    .btn{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:14px;border:none;border-radius:var(--rs);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;-webkit-user-select:none;user-select:none}
-    .btn:active{transform:scale(.97)}
-    .btn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;flex-shrink:0}
-    .btn-p{background:var(--accent);color:#fff;box-shadow:0 4px 14px var(--accent-glow)}
-    .btn-p:disabled{background:var(--bg-input);color:var(--text3);box-shadow:none;cursor:not-allowed}
-    .btn-p:disabled:active{transform:none}
-    .btn-s{background:var(--bg-input);color:var(--text2);border:1px solid var(--border)}
-    .btn-g{background:var(--green);color:#fff}
-    .btn-row{display:flex;gap:8px}.btn-row .btn{flex:1}
-
-    .stitle{font-size:13px;font-weight:600;color:var(--text2);margin-bottom:10px;display:flex;align-items:center;gap:7px}
-    .stitle .n{width:20px;height:20px;border-radius:6px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
-
-    .mt8{margin-top:8px}.mt12{margin-top:12px}.mt14{margin-top:14px}
-    .tc{text-align:center}.tmute{color:var(--text3);font-size:11px}
-
-    .overlay{display:none;position:fixed;inset:0;background:rgba(8,8,14,.92);z-index:100;align-items:center;justify-content:center;flex-direction:column;gap:14px}
-    .overlay.on{display:flex}
-    .spin{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
-    @keyframes sp{to{transform:rotate(360deg)}}
-    .ov-txt{font-size:13px;color:var(--text2)}.ov-sub{font-size:11px;color:var(--text3);margin-top:-6px}
-
-    .cv-banner{padding:8px 14px;background:var(--orange);color:#000;font-size:11px;font-weight:600;text-align:center;display:none;flex-shrink:0}
-    .cv-banner.on{display:block}.cv-banner.ready{background:var(--green)}
-  </style>
+  <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
   <div id="app">
+    <!-- OpenCV status banner -->
     <div class="cv-banner on" id="cvBanner">Cargando OpenCV.js...</div>
 
-    <!-- SCREEN 1: CAPTURA -->
+    <!-- Install banner -->
+    <div class="install-banner" id="installBanner">
+      <p>Instalá la app para usarla offline</p>
+      <button class="btn btn-p" id="btnInstall">Instalar</button>
+      <button class="install-dismiss" id="installDismiss">&times;</button>
+    </div>
+
+    <!-- Batch mode bar -->
+    <div class="batch-bar" id="batchBar">
+      <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v-2"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/><circle cx="9" cy="7" r="4"/></svg>
+      Modo batch · <span class="batch-count" id="batchNum">0</span> firmas
+      <button class="batch-close" id="batchClose">&times;</button>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!-- SCREEN 1: CAPTURE                         -->
+    <!-- ══════════════════════════════════════════ -->
     <div class="scr on" id="s-capture">
-      <div class="hdr"><h1>Escáner de Firmas</h1><span class="badge" id="szLbl">600×200</span></div>
+      <div class="hdr">
+        <h1>Escáner de Firmas</h1>
+        <div class="hdr-actions">
+          <span class="badge" id="szLbl">600×200</span>
+          <button class="hdr-btn" id="btnHistory" title="Historial" style="position:relative">
+            <svg viewBox="0 0 24 24"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>
+            <span id="histBadge" style="display:none;position:absolute;top:-4px;right:-4px;background:var(--accent);color:#fff;font-size:9px;font-family:'JetBrains Mono',monospace;min-width:16px;height:16px;border-radius:8px;align-items:center;justify-content:center;padding:0 4px">0</span>
+          </button>
+        </div>
+      </div>
       <div class="steps"><div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
       <div class="body">
         <p class="stitle"><span class="n">1</span> Capturá la firma</p>
         <div class="cap-zone" id="capZone">
           <div class="cap-ph">
-            <div class="cap-ico"><svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
+            <div class="cap-ico">
+              <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </div>
             <p>Toca para capturar</p>
             <span>Usá la cámara trasera para fotografiar la firma</span>
           </div>
           <img id="capImg" alt="">
         </div>
         <input type="file" id="camIn" accept="image/*" capture="environment">
+
+        <div class="cap-actions">
+          <button class="btn btn-s" id="btnPaste">
+            <svg viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+            Pegar
+          </button>
+          <button class="btn btn-s" id="btnBatch">
+            <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 2v4M8 2v4"/></svg>
+            Modo batch
+          </button>
+        </div>
       </div>
       <div class="bar">
         <button class="btn btn-p" id="btnCrop" disabled>
@@ -182,7 +82,9 @@
       </div>
     </div>
 
-    <!-- SCREEN 2: RECORTE -->
+    <!-- ══════════════════════════════════════════ -->
+    <!-- SCREEN 2: CROP                            -->
+    <!-- ══════════════════════════════════════════ -->
     <div class="scr" id="s-crop">
       <div class="hdr"><h1>Recortar</h1><span class="badge">2 / 4</span></div>
       <div class="steps"><div class="dot ok"></div><div class="dot on"></div><div class="dot"></div><div class="dot"></div></div>
@@ -199,7 +101,9 @@
       </div>
     </div>
 
-    <!-- SCREEN 3: DIGITALIZACIÓN -->
+    <!-- ══════════════════════════════════════════ -->
+    <!-- SCREEN 3: PROCESS + DATA                  -->
+    <!-- ══════════════════════════════════════════ -->
     <div class="scr" id="s-data">
       <div class="hdr"><h1>Digitalizar</h1><span class="badge">3 / 4</span></div>
       <div class="steps"><div class="dot ok"></div><div class="dot ok"></div><div class="dot on"></div><div class="dot"></div></div>
@@ -211,34 +115,85 @@
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4m0-4h.01"/></svg>
             Pipeline de procesamiento
           </div>
+
+          <!-- Method tabs -->
           <div class="method-tabs" id="methodTabs">
             <div class="mtab on" data-m="adaptive">Adaptativo</div>
             <div class="mtab" data-m="otsu">Otsu</div>
             <div class="mtab" data-m="manual">Manual</div>
           </div>
 
+          <!-- Adaptive controls -->
           <div id="ctrlAdaptive">
-            <div class="slider-row"><div class="slider-head"><label>Tamaño de bloque</label><span class="sval" id="vBlock">25</span></div><input type="range" id="rBlock" min="3" max="99" step="2" value="25"></div>
-            <div class="slider-row"><div class="slider-head"><label>Constante C</label><span class="sval" id="vC">10</span></div><input type="range" id="rC" min="0" max="40" value="10"></div>
-          </div>
-          <div id="ctrlOtsu" style="display:none"><p class="tmute tc" style="padding:8px 0">Otsu calcula el umbral automáticamente.<br>Ideal para fotos con buena iluminación.</p></div>
-          <div id="ctrlManual" style="display:none">
-            <div class="slider-row"><div class="slider-head"><label>Umbral manual</label><span class="sval" id="vThresh">128</span></div><input type="range" id="rThresh" min="20" max="240" value="128"></div>
+            <div class="slider-row">
+              <div class="slider-head"><label>Tamaño de bloque</label><span class="sval" id="vBlock">25</span></div>
+              <input type="range" id="rBlock" min="3" max="99" step="2" value="25">
+            </div>
+            <div class="slider-row">
+              <div class="slider-head"><label>Constante C</label><span class="sval" id="vC">10</span></div>
+              <input type="range" id="rC" min="0" max="40" value="10">
+            </div>
           </div>
 
-          <div class="slider-row mt8"><div class="slider-head"><label>Desenfoque Gaussiano</label><span class="sval" id="vBlur">3</span></div><input type="range" id="rBlur" min="0" max="15" step="2" value="3"></div>
+          <!-- Otsu controls -->
+          <div id="ctrlOtsu" style="display:none">
+            <p class="tmute tc" style="padding:8px 0">Otsu calcula el umbral automáticamente.<br>Ideal para fotos con buena iluminación.</p>
+          </div>
+
+          <!-- Manual controls -->
+          <div id="ctrlManual" style="display:none">
+            <div class="slider-row">
+              <div class="slider-head"><label>Umbral manual</label><span class="sval" id="vThresh">128</span></div>
+              <input type="range" id="rThresh" min="20" max="240" value="128">
+            </div>
+          </div>
+
+          <!-- Common controls -->
+          <div class="slider-row mt8">
+            <div class="slider-head"><label>Desenfoque Gaussiano</label><span class="sval" id="vBlur">3</span></div>
+            <input type="range" id="rBlur" min="0" max="15" step="2" value="3">
+          </div>
 
           <div class="toggle-row"><label>Mejora de contraste (CLAHE)</label><div class="toggle on" id="tClahe"></div></div>
           <div class="toggle-row"><label>Limpieza morfológica</label><div class="toggle on" id="tMorph"></div></div>
-          <div id="morphCtrl"><div class="slider-row"><div class="slider-head"><label>Kernel morfológico</label><span class="sval" id="vMorph">2</span></div><input type="range" id="rMorph" min="1" max="5" value="2"></div></div>
+          <div id="morphCtrl">
+            <div class="slider-row">
+              <div class="slider-head"><label>Kernel morfológico</label><span class="sval" id="vMorph">2</span></div>
+              <input type="range" id="rMorph" min="1" max="5" value="2">
+            </div>
+          </div>
           <div class="toggle-row"><label>Auto-recorte (bounding box)</label><div class="toggle on" id="tAutoCrop"></div></div>
+          <div class="toggle-row"><label>Corrección de perspectiva</label><div class="toggle" id="tPerspective"></div></div>
+          <div class="toggle-row"><label>Fondo transparente</label><div class="toggle" id="tTransparent"></div></div>
         </div>
 
+        <!-- Preview -->
         <div class="sig-preview mt14">
           <canvas id="prevCanvas"></canvas>
           <div class="prev-lbl" id="prevLbl">600 × 200 px · PNG</div>
         </div>
 
+        <!-- Before/After comparator toggle -->
+        <button class="btn btn-s mt8" id="btnCompare">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+          Comparar antes / después
+        </button>
+
+        <!-- Comparator -->
+        <div id="comparator" style="display:none">
+          <div class="comparator">
+            <canvas id="compAfter"></canvas>
+            <div class="comp-overlay" id="compOverlay">
+              <canvas id="compBefore"></canvas>
+            </div>
+            <div class="comp-handle" id="compHandle">
+              <svg viewBox="0 0 24 24"><polyline points="8 4 4 8 8 12"/><polyline points="16 4 20 8 16 12"/></svg>
+            </div>
+          </div>
+          <div class="comp-labels"><span>Original</span><span>Procesada</span></div>
+        </div>
+
+        <!-- CI input -->
         <div class="fg mt14">
           <label class="fl">Cédula de Identidad</label>
           <input class="fi" type="text" id="ciInput" placeholder="1.234.567-8" inputmode="numeric" maxlength="12" autocomplete="off">
@@ -255,7 +210,9 @@
       </div>
     </div>
 
-    <!-- SCREEN 4: RESULTADO -->
+    <!-- ══════════════════════════════════════════ -->
+    <!-- SCREEN 4: RESULT                          -->
+    <!-- ══════════════════════════════════════════ -->
     <div class="scr" id="s-result">
       <div class="hdr"><h1>Firma digitalizada</h1><span class="badge">Listo</span></div>
       <div class="steps"><div class="dot ok"></div><div class="dot ok"></div><div class="dot ok"></div><div class="dot ok"></div></div>
@@ -272,363 +229,77 @@
       </div>
       <div class="bar">
         <button class="btn btn-g" id="btnDl" style="margin-bottom:8px">
-          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Descargar firma
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Descargar firma
         </button>
+        <div class="btn-row" style="margin-bottom:8px">
+          <button class="btn btn-s" id="btnShare" style="display:none">
+            <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+            Compartir
+          </button>
+          <button class="btn btn-p" id="btnBatchNext" style="display:none">
+            <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+            Siguiente firma
+          </button>
+        </div>
         <button class="btn btn-s" id="btnNew">
-          <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-11.36L1 10"/></svg>Nueva firma
+          <svg viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 105.64-11.36L1 10"/></svg>
+          Nueva firma
         </button>
       </div>
     </div>
 
+    <!-- ══════════════════════════════════════════ -->
+    <!-- SCREEN 5: HISTORY                         -->
+    <!-- ══════════════════════════════════════════ -->
+    <div class="scr" id="s-history">
+      <div class="hdr">
+        <div style="display:flex;align-items:center;gap:10px">
+          <button class="hdr-btn" id="btnHistBack">
+            <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <h1>Historial</h1>
+        </div>
+        <button class="hdr-btn" id="btnHistClear" title="Limpiar todo">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+        </button>
+      </div>
+      <div class="body" style="padding-bottom:20px">
+        <div class="hist-list" id="histList"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!-- OVERLAY                                    -->
+    <!-- ══════════════════════════════════════════ -->
     <div class="overlay" id="ov">
       <div class="spin"></div>
       <p class="ov-txt" id="ovTxt">Procesando firma...</p>
       <p class="ov-sub" id="ovSub"></p>
+      <div class="ov-progress" id="ovProgress" style="display:none">
+        <div class="ov-bar-fill"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════ -->
+    <!-- CONFIRM DIALOG                             -->
+    <!-- ══════════════════════════════════════════ -->
+    <div class="confirm-dialog" id="confirmDialog">
+      <div class="confirm-box">
+        <p id="confirmMsg">¿Estás seguro?</p>
+        <div class="btn-row">
+          <button class="btn btn-s" id="confirmNo">Cancelar</button>
+          <button class="btn btn-d" id="confirmYes">Eliminar</button>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- SCRIPTS -->
+  <!-- Dependencies -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
   <script async src="https://docs.opencv.org/4.x/opencv.js" id="opencvScript"></script>
 
-  <script>
-    /**
-     * ============================================================
-     * SIGNATURE SCANNER — PIPELINE PROFESIONAL
-     * ============================================================
-     *
-     * PIPELINE DE 7 PASOS (basado en investigación):
-     *
-     * 1. Grayscale → conversión a escala de grises
-     *
-     * 2. CLAHE (Contrast Limited Adaptive Histogram Equalization)
-     *    Mejora contraste local. Esencial para fotos con
-     *    iluminación desigual, sombras, flash, papel arrugado.
-     *    Ref: OpenCV docs, papers de document enhancement.
-     *
-     * 3. Gaussian Blur → reduce ruido de cámara
-     *    Bilateral filter preservaría bordes, pero Gaussian
-     *    es más rápido y suficiente pre-binarización.
-     *    Ref: PyImageSearch adaptive thresholding, OpenCV docs.
-     *
-     * 4. Binarización (3 métodos):
-     *    a) Adaptive Gaussian: umbral local por vecindario.
-     *       El más robusto para documentos con iluminación
-     *       variable. Ref: Sauvola, OpenCV adaptiveThreshold.
-     *    b) Otsu: umbral global automático para imágenes
-     *       bimodales con buena iluminación.
-     *    c) Manual: control directo del usuario.
-     *
-     * 5. Morfología Opening (erosion → dilation)
-     *    Elimina ruido residual (polvo, textura del papel)
-     *    sin destruir trazos. Kernel elíptico para suavidad.
-     *    Ref: OpenCV morphological ops tutorial.
-     *
-     * 6. Auto-crop via Contour Detection
-     *    findContours sobre la firma invertida, merge de
-     *    bounding boxes, recorte con padding configurable.
-     *    Ref: OpenCV contour detection, bounding rect.
-     *
-     * 7. Resize al tamaño de salida (INTER_AREA para downscale).
-     *
-     * FALLBACK: si OpenCV.js no carga, usa Canvas API puro
-     * con binarización simple (luminancia + threshold).
-     *
-     * PARA CLAUDE CODE — extensiones recomendadas:
-     * - Perspective correction (4-point homography)
-     * - Sauvola/Niblack threshold (custom JS)
-     * - Web Worker para processing sin bloquear UI
-     * - IndexedDB para historial de firmas
-     * - PWA + Service Worker para uso offline
-     * - Batch processing para múltiples firmas
-     * ============================================================
-     */
-
-    // ── STATE ──
-    let cvReady = false;
-    let cropper = null;
-    let croppedCanvas = null;
-    let pipelineLog = [];
-
-    // ── DOM ──
-    const $ = s => document.querySelector(s);
-    const $$ = s => document.querySelectorAll(s);
-
-    // ── OpenCV.js load ──
-    function onOpenCvReady() {
-      cvReady = true;
-      const b = $('#cvBanner');
-      b.textContent = 'OpenCV.js listo';
-      b.classList.add('ready');
-      setTimeout(() => b.classList.remove('on'), 1500);
-    }
-
-    const _cvCheck = setInterval(() => {
-      if (typeof cv !== 'undefined') {
-        if (cv.Mat) { clearInterval(_cvCheck); onOpenCvReady(); }
-        else if (!cv._cvReadyHooked) {
-          cv._cvReadyHooked = true;
-          cv['onRuntimeInitialized'] = () => { clearInterval(_cvCheck); onOpenCvReady(); };
-        }
-      }
-    }, 100);
-
-    // ── NAVIGATION ──
-    function go(id) { $$('.scr').forEach(s => s.classList.remove('on')); $(id).classList.add('on'); }
-
-    // ── SCREEN 1: CAPTURA ──
-    $('#capZone').addEventListener('click', () => $('#camIn').click());
-    $('#camIn').addEventListener('change', e => {
-      const f = e.target.files[0]; if (!f) return;
-      const r = new FileReader();
-      r.onload = ev => { $('#capImg').src = ev.target.result; $('#capZone').classList.add('has'); $('#btnCrop').disabled = false; };
-      r.readAsDataURL(f);
-    });
-
-    // ── SCREEN 2: RECORTE ──
-    $('#btnCrop').addEventListener('click', () => {
-      go('#s-crop');
-      $('#cropImg').src = $('#capImg').src;
-      if (cropper) cropper.destroy();
-      setTimeout(() => {
-        cropper = new Cropper($('#cropImg'), {
-          aspectRatio: APP_CONFIG.OUTPUT_WIDTH / APP_CONFIG.OUTPUT_HEIGHT,
-          viewMode: 1, dragMode: 'move', autoCropArea: 0.8,
-          responsive: true, background: false, guides: true,
-        });
-      }, 120);
-    });
-    $('#btnBack1').addEventListener('click', () => { if (cropper) cropper.destroy(); go('#s-capture'); });
-
-    // ── SCREEN 3 ──
-    $('#btnProc').addEventListener('click', () => {
-      if (!cropper) return;
-      showOv('Recortando imagen...');
-      setTimeout(() => {
-        croppedCanvas = cropper.getCroppedCanvas({
-          width: APP_CONFIG.OUTPUT_WIDTH * 2,
-          height: APP_CONFIG.OUTPUT_HEIGHT * 2,
-          imageSmoothingEnabled: true, imageSmoothingQuality: 'high',
-        });
-        hideOv(); go('#s-data'); runPipeline();
-      }, 200);
-    });
-    $('#btnBack2').addEventListener('click', () => go('#s-crop'));
-
-    // ── METHOD TABS ──
-    $$('#methodTabs .mtab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        $$('#methodTabs .mtab').forEach(t => t.classList.remove('on'));
-        tab.classList.add('on');
-        const m = tab.dataset.m;
-        APP_CONFIG.PROCESSING.method = m;
-        $('#ctrlAdaptive').style.display = m === 'adaptive' ? '' : 'none';
-        $('#ctrlOtsu').style.display = m === 'otsu' ? '' : 'none';
-        $('#ctrlManual').style.display = m === 'manual' ? '' : 'none';
-        runPipeline();
-      });
-    });
-
-    // ── SLIDERS ──
-    function bSlider(rId, vId, key) {
-      $(`#${rId}`).addEventListener('input', function() {
-        $(`#${vId}`).textContent = this.value;
-        APP_CONFIG.PROCESSING[key] = parseInt(this.value);
-        runPipeline();
-      });
-    }
-    bSlider('rBlock','vBlock','adaptiveBlockSize');
-    bSlider('rC','vC','adaptiveC');
-    bSlider('rThresh','vThresh','manualThreshold');
-    bSlider('rBlur','vBlur','gaussianBlur');
-    bSlider('rMorph','vMorph','morphKernelSize');
-
-    // ── TOGGLES ──
-    function bToggle(id, key) {
-      $(`#${id}`).addEventListener('click', function() {
-        this.classList.toggle('on');
-        APP_CONFIG.PROCESSING[key] = this.classList.contains('on');
-        if (id === 'tMorph') $('#morphCtrl').style.display = this.classList.contains('on') ? '' : 'none';
-        runPipeline();
-      });
-    }
-    bToggle('tClahe','contrastEnhance');
-    bToggle('tMorph','morphCleanup');
-    bToggle('tAutoCrop','autoCrop');
-
-    // ══════════════════════════════════════════════════
-    // PIPELINE
-    // ══════════════════════════════════════════════════
-    let _pt = null;
-    function runPipeline() { clearTimeout(_pt); _pt = setTimeout(_exec, 60); }
-
-    function _exec() {
-      if (!croppedCanvas) return;
-      const P = APP_CONFIG.PROCESSING, W = APP_CONFIG.OUTPUT_WIDTH, H = APP_CONFIG.OUTPUT_HEIGHT;
-      pipelineLog = [];
-      cvReady ? _cvPipeline(P, W, H) : _fallback(P, W, H);
-      $('#prevLbl').textContent = `${W} × ${H} px · PNG`;
-    }
-
-    function _cvPipeline(P, W, H) {
-      let src = cv.imread(croppedCanvas);
-      pipelineLog.push('Imagen cargada en Mat');
-
-      // 1. Grayscale
-      let gray = new cv.Mat();
-      cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      pipelineLog.push('Escala de grises');
-
-      // 2. CLAHE
-      if (P.contrastEnhance) {
-        let clahe = new cv.CLAHE(P.clipLimit, new cv.Size(P.tileSize, P.tileSize));
-        clahe.apply(gray, gray);
-        clahe.delete();
-        pipelineLog.push(`CLAHE (clip=${P.clipLimit}, tile=${P.tileSize})`);
-      }
-
-      // 3. Gaussian Blur
-      if (P.gaussianBlur > 0) {
-        let k = P.gaussianBlur; if (k % 2 === 0) k++;
-        cv.GaussianBlur(gray, gray, new cv.Size(k, k), 0);
-        pipelineLog.push(`Gaussian Blur (${k}×${k})`);
-      }
-
-      // 4. Binarization
-      let bin = new cv.Mat();
-      if (P.method === 'adaptive') {
-        let bs = P.adaptiveBlockSize;
-        if (bs % 2 === 0) bs++; if (bs < 3) bs = 3;
-        cv.adaptiveThreshold(gray, bin, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, bs, P.adaptiveC);
-        pipelineLog.push(`Adaptive Gaussian (block=${bs}, C=${P.adaptiveC})`);
-      } else if (P.method === 'otsu') {
-        cv.threshold(gray, bin, 0, 255, cv.THRESH_BINARY | cv.THRESH_OTSU);
-        pipelineLog.push('Otsu (automático)');
-      } else {
-        cv.threshold(gray, bin, P.manualThreshold, 255, cv.THRESH_BINARY);
-        pipelineLog.push(`Threshold manual (${P.manualThreshold})`);
-      }
-
-      // 5. Morphological Opening
-      if (P.morphCleanup && P.morphKernelSize > 0) {
-        let ks = P.morphKernelSize;
-        let kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, new cv.Size(ks, ks));
-        cv.morphologyEx(bin, bin, cv.MORPH_OPEN, kernel);
-        kernel.delete();
-        pipelineLog.push(`Morfología Opening (elipse ${ks}×${ks})`);
-      }
-
-      // 6. Auto-crop via contours
-      let finalMat = bin;
-      if (P.autoCrop) {
-        let inv = new cv.Mat();
-        cv.bitwise_not(bin, inv);
-        let contours = new cv.MatVector();
-        let hier = new cv.Mat();
-        cv.findContours(inv, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
-
-        if (contours.size() > 0) {
-          let x1 = bin.cols, y1 = bin.rows, x2 = 0, y2 = 0;
-          for (let i = 0; i < contours.size(); i++) {
-            let r = cv.boundingRect(contours.get(i));
-            x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y);
-            x2 = Math.max(x2, r.x + r.width); y2 = Math.max(y2, r.y + r.height);
-          }
-          let pad = P.autoCropPadding;
-          x1 = Math.max(0, x1 - pad); y1 = Math.max(0, y1 - pad);
-          x2 = Math.min(bin.cols, x2 + pad); y2 = Math.min(bin.rows, y2 + pad);
-          let cw = x2 - x1, ch = y2 - y1;
-          if (cw > 10 && ch > 10) {
-            let roi = bin.roi(new cv.Rect(x1, y1, cw, ch));
-            finalMat = new cv.Mat(); roi.copyTo(finalMat); roi.delete();
-            pipelineLog.push(`Auto-crop (${cw}×${ch}, ${contours.size()} contornos)`);
-          }
-        }
-        inv.delete(); contours.delete(); hier.delete();
-      }
-
-      // 7. Resize
-      let out = new cv.Mat();
-      cv.resize(finalMat, out, new cv.Size(W, H), 0, 0, cv.INTER_AREA);
-      pipelineLog.push(`Resize ${W}×${H}`);
-
-      // Render
-      let pc = $('#prevCanvas'); pc.width = W; pc.height = H;
-      cv.imshow(pc, out);
-
-      // Cleanup
-      src.delete(); gray.delete();
-      if (bin !== finalMat) bin.delete();
-      if (finalMat !== out) finalMat.delete();
-      out.delete();
-    }
-
-    function _fallback(P, W, H) {
-      pipelineLog.push('⚠ Fallback Canvas API (OpenCV no cargó)');
-      let c = $('#prevCanvas'); c.width = W; c.height = H;
-      let ctx = c.getContext('2d');
-      ctx.drawImage(croppedCanvas, 0, 0, W, H);
-      let d = ctx.getImageData(0, 0, W, H), px = d.data, t = P.manualThreshold;
-      for (let i = 0; i < px.length; i += 4) {
-        let g = px[i]*.299 + px[i+1]*.587 + px[i+2]*.114;
-        let v = g < t ? 0 : 255;
-        px[i] = px[i+1] = px[i+2] = v; px[i+3] = 255;
-      }
-      ctx.putImageData(d, 0, 0);
-      pipelineLog.push(`Binarización simple (${t})`);
-    }
-
-    // ── CÉDULA ──
-    $('#ciInput').addEventListener('input', e => {
-      let raw = e.target.value.replace(/\D/g, ''), f = '';
-      if (raw.length >= 1) f = raw.slice(0,1);
-      if (raw.length >= 2) f += '.' + raw.slice(1, Math.min(4, raw.length));
-      if (raw.length >= 5) f += '.' + raw.slice(4, Math.min(7, raw.length));
-      if (raw.length >= 8) f += '-' + raw.slice(7, 8);
-      e.target.value = f;
-      $('#btnSave').disabled = raw.length < 7;
-    });
-
-    // ── SCREEN 4 ──
-    $('#btnSave').addEventListener('click', () => {
-      const W = APP_CONFIG.OUTPUT_WIDTH, H = APP_CONFIG.OUTPUT_HEIGHT;
-      const ci = $('#ciInput').value.trim(), ciC = ci.replace(/\D/g,'');
-      let rc = $('#resCanvas'); rc.width = W; rc.height = H;
-      rc.getContext('2d').drawImage($('#prevCanvas'), 0, 0, W, H);
-      $('#resCi').textContent = ci;
-      $('#resDim').textContent = `${W} × ${H} px`;
-      let fn = `${APP_CONFIG.FILE_PREFIX}_${ciC}.png`;
-      $('#resFn').textContent = fn;
-      $('#pipeLog').innerHTML =
-        '<div class="proc-title" style="margin-bottom:6px"><svg viewBox="0 0 24 24" style="width:12px;height:12px;stroke:var(--accent);fill:none;stroke-width:2"><polyline points="20 6 9 17 4 12"/></svg>Pipeline aplicado</div>' +
-        pipelineLog.map((s,i) => `<div class="pipe-step"><b>${i+1}.</b> ${s}</div>`).join('');
-      go('#s-result');
-    });
-
-    // ── DOWNLOAD ──
-    $('#btnDl').addEventListener('click', () => {
-      let ci = $('#ciInput').value.replace(/\D/g,''), fn = `${APP_CONFIG.FILE_PREFIX}_${ci}.png`;
-      $('#resCanvas').toBlob(blob => {
-        let u = URL.createObjectURL(blob), a = document.createElement('a');
-        a.href = u; a.download = fn; document.body.appendChild(a); a.click();
-        document.body.removeChild(a); URL.revokeObjectURL(u);
-      }, APP_CONFIG.OUTPUT_FORMAT);
-    });
-
-    // ── NEW ──
-    $('#btnNew').addEventListener('click', () => {
-      $('#capImg').src=''; $('#capZone').classList.remove('has'); $('#camIn').value='';
-      $('#ciInput').value=''; $('#btnCrop').disabled=true; $('#btnSave').disabled=true;
-      croppedCanvas=null; pipelineLog=[];
-      if(cropper){cropper.destroy();cropper=null;} go('#s-capture');
-    });
-
-    // ── OVERLAY ──
-    function showOv(t,s){$('#ovTxt').textContent=t||'Procesando...';$('#ovSub').textContent=s||'';$('#ov').classList.add('on')}
-    function hideOv(){$('#ov').classList.remove('on')}
-
-    // ── INIT ──
-    $('#szLbl').textContent=`${APP_CONFIG.OUTPUT_WIDTH}×${APP_CONFIG.OUTPUT_HEIGHT}`;
-  </script>
+  <!-- App -->
+  <script type="module" src="js/app.js"></script>
 </body>
 </html>
